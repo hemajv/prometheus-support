@@ -361,6 +361,12 @@ scrape_configs:
         target_label: experiment
         replacement: ndt.iupui
 
+      - source_labels: [node]
+        regex: (mlab[1-4])[.-]([a-z]{3}[0-9tc]{2}).*
+        action: replace
+        replacement: ${1}LOL${2}.{{PROJECT}}.measurement-lab.org
+        target_label: node
+
       # Rewrite the machine label to make it easier to join these metrics with
       # existing metrics that use machine instead of the node label.
       #
