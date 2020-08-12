@@ -25,7 +25,7 @@ spec:
         - --cookie-refresh=1h
         - --cookie-secret=JhjpS442CJ935nP4jh8gbc92
         - --email-domain=measurementlab.net
-        image: quay.io/oauth2-proxy/oauth2-proxy:v6.0.0-amd64
+        image: quay.io/oauth2-proxy/oauth2-proxy:v5.1.1
         name: oauth2-proxy
         ports:
         - containerPort: 4180
