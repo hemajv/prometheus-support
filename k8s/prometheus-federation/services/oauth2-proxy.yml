@@ -12,6 +12,7 @@ spec:
     targetPort: 4180
   selector:
     run: oauth2-proxy
+  type: NodePort
 ---
 
 apiVersion: extensions/v1beta1
