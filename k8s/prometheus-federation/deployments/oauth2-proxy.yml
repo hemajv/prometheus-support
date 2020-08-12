@@ -23,7 +23,7 @@ spec:
         - --client-secret={{OAUTH_PROXY_CLIENT_SECRET}}
         - --cookie-domain=prometheus.{{GCLOUD_PROJECT}}.measurementlab.net
         - --cookie-refresh=1h
-        - --cookie-secret="JhjpS442CJ935nP4jh8gbc9"
+        - --cookie-secret=JhjpS442CJ935nP4jh8gbc92
         - --email-domain="measurementlab.net"
         image: quay.io/oauth2-proxy/oauth2-proxy:v6.0.0-amd64
         name: oauth2-proxy
