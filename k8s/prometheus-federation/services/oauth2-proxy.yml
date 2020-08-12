@@ -11,4 +11,4 @@ spec:
     protocol: TCP
     targetPort: 4180
   selector:
-    app: oauth2-proxy
+    run: oauth2-proxy
