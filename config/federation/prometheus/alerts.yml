@@ -249,7 +249,8 @@ groups:
   # Blackbox exporter probes to a machine are succeeding to a node that
   # kubernetes does not know about (not joined to the k8s cluster).
   - alert: MachineRunningWithoutK8sNode
-    expr: probe_success{service="ndt_ssl"} == 1 unless on(machine) kube_node_status_condition
+    expr: probe_success{service="ssh"} == 1 unless on(machine) kube_node_status_condition
+            unless on(machine) gmx_machine_maintenance == 1
     for: 1h
     labels:
       repo: ops-tracker
@@ -257,7 +258,7 @@ groups:
     annotations:
       summary: A machine is running that is not part of the k8s cluster.
       description: >
-        Blackbox exporter probes (for ndt_ssl) are succeeding to a node that
+        Blackbox exporter probes (for ssh) are succeeding to a node that
         kubernetes does not know about. This can happen when a machine gets
         segmented from the network, then gets manually deleted from kubernetes,
         then at some point the machine has its network connectivity restored.
@@ -794,21 +795,82 @@ groups:
       description: Login to EB to see if it is in fact crashed. If so, look
         through the logs.
 
-# GardenerDownOrMissing fires when the etl-gardener is down or absent.
+# DataProcessingCluster_GardenerDownOrMissing fires when the etl-gardener is down or absent.
 # TODO: enable annotations to ignore some container ports, and simplify this query.
 # https://github.com/m-lab/prometheus-support/issues/48
-  - alert: GardenerDownOrMissing
+  - alert: DataProcessingCluster_GardenerDownOrMissing
     expr: |
-      up{container="etl-gardener",instance=~".*:9090"} == 0
-        or absent(up{container="etl-gardener",instance=~".*:9090"})
+      up{container="etl-gardener", deployment!="etl-gardener-universal", instance=~".*:9090"} == 0
+        or absent(up{container="etl-gardener", deployment!="etl-gardener-universal", instance=~".*:9090"})
     for: 10m
     labels:
       repo: dev-tracker
       severity: ticket
     annotations:
-      summary: The ETL Gardener instance is down or missing.
+      summary: The Gardener instance is down or missing.
       description: Gardener runs in the data-processing-cluster.
-      dashboard: https://grafana.mlab-oti.measurementlab.net/d/eBbUW6oik
+      dashboard: https://grafana.mlab-oti.measurementlab.net/d/eBbUW6oik/pipeline-gardener?var-project=mlab-oti&var-pipelineDatasource=Data%20Proc%20(mlab-oti)
+
+# DataProcessing_GardenerDownOrMissing fires when the etl-gardener-universal is down or absent.
+# TODO: enable annotations to ignore some container ports, and simplify this query.
+# https://github.com/m-lab/prometheus-support/issues/48
+  - alert: DataProcessing_GardenerDownOrMissing
+    expr: |
+      up{cluster="data-processing", container="etl-gardener",instance=~".*:9090"} == 0
+        or absent(up{cluster="data-processing", container="etl-gardener",instance=~".*:9090"})
+    for: 10m
+    labels:
+      repo: dev-tracker
+      severity: ticket
+    annotations:
+      summary: The Universal Gardener instance is down or missing.
+      description: Gardener runs in the "data-processing" cluster.
+      dashboard: https://grafana.mlab-oti.measurementlab.net/d/eBbUW6oik/pipeline-gardener?var-project=mlab-oti&var-pipelineDatasource=Data%20Processing%20(mlab-oti)
+
+# DataProcessing_ParserDownOrMissing fires when the k8s etl-parser is down or absent.
+# TODO: enable annotations to ignore some container ports, and simplify this query.
+# https://github.com/m-lab/prometheus-support/issues/48
+  - alert: UniversalParserDownOrMissing
+    expr: |
+      up{cluster="data-processing", container="etl-parser",instance=~".*:9090"} == 0
+        or absent(up{cluster="data-processing", container="etl-parser",instance=~".*:9090"})
+    for: 10m
+    labels:
+      repo: dev-tracker
+      severity: ticket
+    annotations:
+      summary: ETL Parser instance is down or missing {{ $labels.instance }}.
+      description: These parsers run in the "data-processing" cluster.
+      # TODO #736 - update this when k8s dashboard is deployed to production.
+      dashboard: https://grafana.mlab-oti.measurementlab.net/d/eBbUW6oik/pipeline-gardener?var-project=mlab-oti&var-pipelineDatasource=Data%20Processing%20(mlab-oti)
+
+# GardenerDailyParsingIsBehind fires when daily processing has fallen behind
+# There should always be either 3 or 4 of the past four dates available.
+  - alert: GardenerDailyParsingIsBehind
+    expr: |
+      bq_gardener_daily_done_last_4_days < 3
+    for: 10m
+    labels:
+      repo: dev-tracker
+      severity: ticket
+    annotations:
+      summary: Daily processing for {{ $labels.datatype }} has fallen behind.
+      description: Gardener runs in the "data-processing" cluster.
+      dashboard: https://grafana.mlab-oti.measurementlab.net/d/eBbUW6oik/pipeline-gardener?var-project=mlab-oti&var-pipelineDatasource=Data%20Processing%20(mlab-oti)
+
+# GardenerSlowProgress fires when reprocessing is stalled for NDT7
+# The expected rate is actually much higher than 24, but this is a conservative SLO.
+  - alert: GardenerSlowProgress
+    expr: |
+      bq_gardener_dates_fully_parsed_last_day < 24
+    for: 10m
+    labels:
+      repo: dev-tracker
+      severity: ticket
+    annotations:
+      summary: Reprocessing for {{ $labels.datatype }} has fallen behind.
+      description: Gardener runs in the "data-processing" cluster.
+      dashboard: https://grafana.mlab-oti.measurementlab.net/d/eBbUW6oik/pipeline-gardener?var-project=mlab-oti&var-pipelineDatasource=Data%20Processing%20(mlab-oti)
 
 # ETL_ParserPanicNonZero fires when an ETL parser panics. The number of panics
 # may increase due to a transient issue or a short-lived trigger for a parser
@@ -1052,17 +1114,22 @@ groups:
         the DaemonSet is healthy (`kubectl describe ds cadvisor`).
       dashboard: https://grafana.mlab-staging.measurementlab.net/d/tZHLFQRZk/k8s-workload-overview
 
-  - alert: PlatformCluster_FluentdMissing
-    expr: absent(up{deployment="fluentd", cluster="platform-cluster"})
+  # NOTE: this alert is currently structured a bit differently than the other
+  # "DaemonSet Missing" alerts because Vector does not currently expose any
+  # metrics and cannot be auto-discovered by Prometheus as part of the
+  # kubernetes-pods job. Therefore, in this one case we use one known metric
+  # that is valid for Vector to determine if metrics are missing or not.
+  - alert: PlatformCluster_VectorMissing
+    expr: absent(kube_daemonset_status_desired_number_scheduled{daemonset="vector", cluster="platform-cluster"})
     for: 15m
     labels:
       repo: ops-tracker
       severity: ticket
     annotations:
-      summary: The Fluentd DaemonSet is missing or has no metrics.
-      description: The Fluentd DaemonSet is missing or has no metrics. Verify that
-        the DaemonSet is healthy (`kubectl describe ds fluentd`).
-      dashboard: https://grafana.mlab-staging.measurementlab.net/d/tZHLFQRZk/k8s-workload-overview
+      summary: The Vector DaemonSet is missing or has no metrics.
+      description: The Vector DaemonSet is missing or has no metrics. Verify that
+        the DaemonSet is healthy (`kubectl describe ds vector`).
+      dashboard: https://grafana.mlab-oti.measurementlab.net/d/tZHLFQRZk/k8s-workload-overview
 
   - alert: PlatformCluster_NdtMissing
     expr: absent(up{deployment="ndt", cluster="platform-cluster"})
@@ -1453,17 +1520,20 @@ groups:
         status of the load balancer in the GCP console.
 
 # Platform Hardware alerts
-
+  # TODO(kinkade): this alert is only valid for R630s. R640s will have 32 or
+  # 64GB of RAM. We will need a way to distinguish between the two for the
+  # purposes of this alert.
   - alert: PlatformHardware_RamBelowExpected
     expr: |
       node_memory_MemTotal_bytes{machine=~"^mlab[1-4].[a-z]{3}[0-9]{2}.*"} / 2^20 < 15000
+        unless on(node) gmx_machine_maintenance == 1
     for: 1d
     labels:
       repo: ops-tracker
       severity: ticket
     annotations:
       summary: System RAM is below the expected minimum value.
-      description: All M-Lab machines have at least 16GB of RAM. The quantity
+      description: All M-Lab R630s have at least 16GB of RAM. The quantity
         of RAM on one or more machines has gone below 15GB, which may indicate
         a failed RAM module. Login to the machine and double check
         the hardware and/or system messages.
